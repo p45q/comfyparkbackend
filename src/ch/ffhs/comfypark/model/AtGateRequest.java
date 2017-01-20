@@ -1,30 +1,41 @@
 package ch.ffhs.comfypark.model;
 
 public class AtGateRequest {
-   public String gateUUID;
-   public String customerID;
+	private int gateUUID;
+	private int customerID;
+	private String cmd;
 
-   public String getFirstName() {
-       return gateUUID;
-   }
+	public AtGateRequest(int gateUUID, int customerID, String cmd) {
+		this.gateUUID = gateUUID;
+		this.customerID = customerID;
+		this.cmd = cmd;
+	}
 
-   public void setFirstName(String firstName) {
-       this.gateUUID = firstName;
-   }
+	public AtGateRequest() {
+		this(0, 0, "");
+	}
 
-   public String getLastName() {
-       return customerID;
-   }
+	public int getGateUUID() {
+		return gateUUID;
+	}
 
-   public void setLastName(String lastName) {
-       this.customerID = lastName;
-   }
+	public void setGateUUID(int firstName) {
+		this.gateUUID = firstName;
+	}
 
-   public AtGateRequest(String firstName, String lastName) {
-       this.gateUUID = firstName;
-       this.customerID = lastName;
-   }
+	public int getCustomerID() {
+		return customerID;
+	}
 
-   public AtGateRequest() {
-   }
+	public void setCustomerID(int customerID) {
+		this.customerID = customerID;
+	}
+
+	public String getCmd() {
+		return cmd;
+	}
+
+	public void setCmd(String cmd) {
+		this.cmd = cmd;
+	}
 }

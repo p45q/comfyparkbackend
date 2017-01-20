@@ -1,4 +1,4 @@
-package ch.ffhs.comfypark;
+package ch.ffhs.comfypark.teststuff;
 
 import com.amazonaws.services.lambda.runtime.ClientContext;
 import com.amazonaws.services.lambda.runtime.CognitoIdentity;
