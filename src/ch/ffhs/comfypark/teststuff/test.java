@@ -19,6 +19,7 @@ import com.sun.jmx.snmp.tasks.Task;
 import ch.ffhs.comfypark.model.AtGateRequest;
 import ch.ffhs.comfypark.model.AtGateResponse;
 import ch.ffhs.comfypark.model.db.Parking;
+import ch.ffhs.comfypark.model.db.User;
 import sun.security.action.GetBooleanAction;
 
 public class test {
@@ -27,10 +28,7 @@ public class test {
 		// TODO Auto-generated method stub
 		Sql2o sql2o = new Sql2o("jdbc:mysql://comfyparkdb.cjn6mrex9bqq.eu-west-1.rds.amazonaws.com:3306/comfypark", "ffhs", "glauer.ch");
 		String sql = "SELECT * FROM parking";
-
 	}
-	
-	
 
 	
 	private static String getTime(){

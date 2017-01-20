@@ -3,6 +3,7 @@ package ch.ffhs.comfypark;
 import ch.ffhs.comfypark.model.AtGateRequest;
 import ch.ffhs.comfypark.model.AtGateResponse;
 import ch.ffhs.comfypark.model.db.Parking;
+import ch.ffhs.comfypark.model.db.User;
 
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
@@ -23,6 +24,9 @@ public class LambdaFunctionHandler implements RequestHandler<AtGateRequest, AtGa
 	private GateProvider gateProvider;
 	private PaymentProvider paymentProvider;
 
+	private User user;
+	private AtGateRequest request;
+
 	private Sql2o sql2o;
 
 	public LambdaFunctionHandler() {
@@ -41,10 +45,18 @@ public class LambdaFunctionHandler implements RequestHandler<AtGateRequest, AtGa
 			return new AtGateResponse("Error required data missing", false);
 		}
 
-		// check checkin/checkout
-		Parking lastParking = getLastParking(request);
+		// authenticate
+		setUser(authenticate(request));
+		if (getUser() == null) {
+			return new AtGateResponse("Error authentication failed", false);
+		}
 
-		switch (request.getCmd()) {
+		setRequest(request);
+
+		// check checkin/checkout
+		Parking lastParking = getLastParking();
+
+		switch (request.getCmd()) {	
 		case "getStatus":
 			if (lastParking == null) {
 				return new AtGateResponse("You haven't Checked-In", 0, 000);
@@ -55,14 +67,14 @@ public class LambdaFunctionHandler implements RequestHandler<AtGateRequest, AtGa
 
 		case "parking":
 			// check required data
-			if (request.getGateUUID() == 0 || request.getCustomerID() == 0) {
+			if (request.getGateUUID() == 0) {
 				return new AtGateResponse("Error required data missing", false);
 			}
 
 			if (lastParking == null) {
-				return checkIn(request);
+				return checkIn();
 			} else {
-				return checkOut(request, lastParking);
+				return checkOut(lastParking);
 			}
 
 		}
@@ -70,9 +82,30 @@ public class LambdaFunctionHandler implements RequestHandler<AtGateRequest, AtGa
 		return new AtGateResponse("Error required data missing", false);
 	}
 
-	private Parking getLastParking(AtGateRequest request) {
+	private User authenticate(AtGateRequest request) {
+		if (request.getCustomerID().length() == 0) {
+			return null;
+		}
+
 		StringBuilder query = new StringBuilder();
-		query.append("SELECT * FROM parking WHERE userid = ").append(request.getCustomerID())
+		query.append("SELECT * FROM users WHERE MD5(uid) = '").append(request.getCustomerID()).append("'");
+
+		try (Connection con = sql2o.open()) {
+			List<User> users = con.createQuery(query.toString()).executeAndFetch(User.class);
+
+			if (users.isEmpty()) {
+				return null;
+			} else {
+				return users.get(0);
+			}
+		} catch (Exception e) {
+			return null;
+		}
+	}
+
+	private Parking getLastParking() {
+		StringBuilder query = new StringBuilder();
+		query.append("SELECT * FROM parking WHERE userid = ").append(user.getUid())
 				.append(" AND gateIn IS NOT NULL AND gateOut IS NULL");
 
 		try (Connection con = sql2o.open()) {
@@ -86,10 +119,9 @@ public class LambdaFunctionHandler implements RequestHandler<AtGateRequest, AtGa
 		} catch (Exception e) {
 			return null;
 		}
-
 	}
 
-	private AtGateResponse checkIn(AtGateRequest request) {
+	private AtGateResponse checkIn() {
 		if (gateProvider.openGate(request.getGateUUID())) {
 			StringBuilder query = new StringBuilder();
 			String currentTimestamp = getTime();
@@ -97,7 +129,7 @@ public class LambdaFunctionHandler implements RequestHandler<AtGateRequest, AtGa
 			query.append("INSERT INTO parking (userId, gateIn, timeIn) VALUES(:userId, :gateIn, :timeIn)");
 
 			try (Connection con = sql2o.open()) {
-				con.createQuery(query.toString()).addParameter("userId", request.getCustomerID())
+				con.createQuery(query.toString()).addParameter("userId", user.getUid())
 						.addParameter("gateIn", request.getGateUUID()).addParameter("timeIn", currentTimestamp)
 						.executeUpdate();
 			} catch (Exception e) {
@@ -111,14 +143,14 @@ public class LambdaFunctionHandler implements RequestHandler<AtGateRequest, AtGa
 		return new AtGateResponse("Error could not open Gate", false);
 	}
 
-	private AtGateResponse checkOut(AtGateRequest request, Parking parking) {
+	private AtGateResponse checkOut(Parking lastParking) {
 		// calc parking time
 		DateFormat format = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 
 		long parkingTime;
 
 		try {
-			Date d1 = format.parse(parking.getTimeIn());
+			Date d1 = format.parse(lastParking.getTimeIn());
 			Date d2 = format.parse(getTime());
 
 			long diff = d2.getTime() - d1.getTime();
@@ -135,7 +167,7 @@ public class LambdaFunctionHandler implements RequestHandler<AtGateRequest, AtGa
 		DecimalFormat df = new DecimalFormat("#.##");
 		price = Double.valueOf(df.format(price));
 
-		if (paymentProvider.processPayment(request.getCustomerID(), price)) {
+		if (paymentProvider.processPayment(user.getUid(), price)) {
 			if (gateProvider.openGate(request.getGateUUID())) {
 				StringBuilder query = new StringBuilder();
 				String currentTimestamp = getTime();
@@ -146,7 +178,7 @@ public class LambdaFunctionHandler implements RequestHandler<AtGateRequest, AtGa
 				try (Connection con = sql2o.open()) {
 					con.createQuery(query.toString()).addParameter("gateOut", request.getGateUUID())
 							.addParameter("timeOut", currentTimestamp).addParameter("price", price)
-							.addParameter("uid", parking.getUid()).executeUpdate();
+							.addParameter("uid", lastParking.getUid()).executeUpdate();
 				} catch (Exception e) {
 					return new AtGateResponse("Error could not process Check-Out", false);
 				}
@@ -169,4 +201,21 @@ public class LambdaFunctionHandler implements RequestHandler<AtGateRequest, AtGa
 
 		return formatter.format(currentdate.getTime());
 	}
+
+	public User getUser() {
+		return user;
+	}
+
+	public void setUser(User user) {
+		this.user = user;
+	}
+
+	public AtGateRequest getRequest() {
+		return request;
+	}
+
+	public void setRequest(AtGateRequest request) {
+		this.request = request;
+	}
+
 }
