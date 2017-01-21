@@ -1,4 +1,4 @@
-package ch.ffhs.comfypark.model.db;
+package ch.ffhs.comfypark.mysql.models;
 
 public class Parking {
 	private int uid;

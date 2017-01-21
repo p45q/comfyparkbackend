@@ -1,5 +1,5 @@
 #Lambda Function Project Metadata
-#Fri Jan 20 13:08:58 CET 2017
-lastDeploymentFunctionName=ComfyParkBackend
+#Fri Jan 20 22:58:36 CET 2017
+lastDeploymentFunctionName=Parking
 lastDeploymentBucketName=comfypark
 lastDeploymentEndpoint=https\://lambda.eu-west-1.amazonaws.com/
