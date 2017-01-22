@@ -4,7 +4,8 @@ import ch.ffhs.comfypark.config.ComfyParkConfig;
 import ch.ffhs.comfypark.config.models.MySQL;
 import ch.ffhs.comfypark.lambdaHandler.login.models.LoginRequest;
 import ch.ffhs.comfypark.lambdaHandler.login.models.LoginResponse;
-import ch.ffhs.comfypark.lambdaHandler.models.BasicRequest;
+import ch.ffhs.comfypark.lambdaHandler.models.SignedRequest;
+import ch.ffhs.comfypark.lambdaHandler.models.UnauthorizedResponse;
 import ch.ffhs.comfypark.lambdaHandler.models.BasicResponse;
 import ch.ffhs.comfypark.lambdaHandler.parking.models.ParkingRequest;
 import ch.ffhs.comfypark.lambdaHandler.parking.models.ParkingResponse;
@@ -47,32 +48,65 @@ public class ComfyPark {
 	}
 
 	public BasicResponse processLoginRequest(LoginRequest request) {
-		StringBuilder query = new StringBuilder();
-		query.append("SELECT * FROM users WHERE username = :username AND SHA2(CONCAT(password, '")
-				.append(getConfig().getBackend().getHashSalt()).append("'), 256) = :password");
-
-		try (Connection con = sql2o.open()) {
-			List<User> users = con.createQuery(query.toString()).addParameter("username", request.getUsername())
-					.addParameter("password", request.getPassword()).executeAndFetch(User.class);
-
-			if (!users.isEmpty()) {
-				return new LoginResponse(true, "Authentication success", users.get(0),
-						getHash(Integer.toString(users.get(0).getUid())));
+		// check required data
+		if (request != null && request.getUsername() != null && request.getUsername().length() != 0 && request.getPassword() != null && request.getPassword().length() != 0) {	
+			StringBuilder query = new StringBuilder()
+				.append("SELECT * FROM users WHERE username = :username AND SHA2(CONCAT(password, '")
+				.append(getConfig().getBackend().getHashSalt())
+				.append("'), 256) = :password");
+	
+			try (Connection con = sql2o.open()) {
+				List<User> users = con.createQuery(query.toString())
+					.addParameter("username", request.getUsername())
+					.addParameter("password", request.getPassword())
+					.executeAndFetch(User.class);
+	
+				if (!users.isEmpty()) {
+					String currentTimestamp = getTime();
+					User userTemp = users.get(0);
+	
+					// update user meta data
+					String updateQuery = "UPDATE users SET lastLogin = :lastLogin, countLogins = countLogins + 1 WHERE uid = :uid";
+					con.createQuery(updateQuery)
+						.addParameter("lastLogin", currentTimestamp)
+						.addParameter("uid", userTemp.getUid())
+						.executeUpdate();
+	
+					// get latest user data
+					String selectQuery = "SELECT * FROM users WHERE uid = :uid";
+					List<User> latestUsers = con.createQuery(selectQuery)
+							.addParameter("uid", users.get(0).getUid())
+							.executeAndFetch(User.class);
+	
+					if (!latestUsers.isEmpty()) {
+						// return user-token for further requests
+						return new LoginResponse(true, "Login successful", latestUsers.get(0), buildUserToken(latestUsers.get(0)));
+					}
+				}
+			} catch (Exception e) {
+				// TODO
 			}
-		} catch (Exception e) {
-			// TODO
+
+			return new BasicResponse(false, "Login failed, please check your username and password");
 		}
 
-		return new BasicResponse(false, "Error - Authentication failed");
+		return new BasicResponse(false, "Login failed, required data missing");
 	}
 
-	public BasicResponse processAuthentication(BasicRequest request) {
+	public BasicResponse processUserTokenAuthentication(SignedRequest request) {
 		if (request != null && request.getUserToken() != null && request.getUserToken().length() != 0) {
-			StringBuilder query = new StringBuilder();
+			Calendar calendar = Calendar.getInstance();
 
-			query.append("SELECT * FROM users WHERE SHA2(CONCAT(uid, '" + getConfig().getBackend().getHashSalt()
-					+ "'), 256) = '").append(request.getUserToken()).append("'");
-
+			StringBuilder query = new StringBuilder()
+				.append("SELECT * FROM users WHERE SHA2(CONCAT(") 
+					.append("uid, ")
+					.append("countLogins, ")
+					.append("'").append(calendar.get(Calendar.DAY_OF_YEAR)).append("', ")
+					.append("'").append(getConfig().getBackend().getHashSalt()).append("'")
+				.append("), 256)")
+				.append("=")
+				.append("'").append(request.getUserToken()).append("'");
+				
 			try (Connection con = sql2o.open()) {
 				List<User> users = con.createQuery(query.toString()).executeAndFetch(User.class);
 
@@ -86,34 +120,74 @@ public class ComfyPark {
 			}
 
 			if (isAuthenticated()) {
-				return new BasicResponse(true, "Authentication OK");
+				return new BasicResponse(true, "Authenticated successful");
+			}
+			
+			return new UnauthorizedResponse(false, "Invalid request, user authentication expired");
+		}
+
+		return new UnauthorizedResponse(false, "Illegal request, user authentication missing");
+	}
+
+	public BasicResponse processRequestTokenVerification(SignedRequest request) {
+		if (request != null && request.getRequestToken() != null && request.getRequestToken().length() != 0) {
+			if (buildRequestToken(getUser(), request).equals(request.getRequestToken())) {
+				return new BasicResponse(true, "Request verified successful");
+			}
+			else{
+				return new UnauthorizedResponse(false, "Invalid request, request authentication expired");
 			}
 		}
 
-		return new BasicResponse(false, "Error authentication failed");
+		return new UnauthorizedResponse(false, "Illegal request, request authentication missing");
 	}
 
 	public BasicResponse processParkingRequest(ParkingRequest request) {
-		// check checkin/checkout
-		Parking lastParking = getLastParking();
+		// check required data
+		if (request.getGateId() != 0) {
+			Parking lastParking = getLastParking();
+			
+			// determine check-in or check-out
+			if (lastParking == null) {
+				return checkIn(request);
+			} else {
+				return checkOut(request, lastParking);
+			}
+		}
+				
+		return new BasicResponse(false, "Error required data missing");
+	}
 
+	public BasicResponse processStatusRequest(SignedRequest request) {
+		Parking lastParking = getLastParking();
+		
+		// determine checked-in or checked-out
 		if (lastParking == null) {
-			return checkIn(request);
+			return new BasicResponse(true, "Not checked-in yet");
 		} else {
-			return checkOut(request, lastParking);
+			return new StatusResponse(true, "Checked-in at gate " + lastParking.getUid(),
+					lastParking.getGateIn(), lastParking.getTimeIn());
 		}
 	}
 
-	public BasicResponse processStatusRequest(BasicRequest request) {
-		// check checkin/checkout
-		Parking lastParking = getLastParking();
+	private String buildUserToken(User user) {
+		Calendar calendar = Calendar.getInstance();
 
-		if (lastParking == null) {
-			return new BasicResponse(true, "You haven't Checked-In");
-		} else {
-			return new StatusResponse(true, "You have successfully Checked-In at Gate " + lastParking.getUid(),
-					lastParking.getGateIn(), lastParking.getTimeIn());
-		}
+		StringBuilder tokenValue = new StringBuilder()
+			.append(user.getUid())
+			.append(user.getCountLogins())
+			.append(calendar.get(Calendar.DAY_OF_YEAR));
+
+		return getHash(tokenValue.toString());
+	}
+
+	private String buildRequestToken(User user, SignedRequest request) {
+		StringBuilder tokenValue = new StringBuilder()
+			.append(user.getUid())
+			.append(user.getCountLogins())
+			.append(request.buildRequestTokenValue());
+		
+		return getHash(tokenValue.toString());
 	}
 
 	private Boolean isAuthenticated() {
@@ -121,9 +195,10 @@ public class ComfyPark {
 	}
 
 	private Parking getLastParking() {
-		StringBuilder query = new StringBuilder();
-		query.append("SELECT * FROM parking WHERE userid = ").append(getUser().getUid())
-				.append(" AND gateIn IS NOT NULL AND gateOut IS NULL");
+		StringBuilder query = new StringBuilder()
+			.append("SELECT * FROM parking WHERE userid = ")
+			.append(getUser().getUid())
+			.append(" AND gateIn IS NOT NULL AND gateOut IS NULL");
 
 		try (Connection con = getSql2o().open()) {
 			List<Parking> parkings = con.createQuery(query.toString()).executeAndFetch(Parking.class);
@@ -140,29 +215,30 @@ public class ComfyPark {
 	}
 
 	private BasicResponse checkIn(ParkingRequest request) {
+		// open gate
 		if (getGateProvider().openGate(request.getGateId())) {
-			StringBuilder query = new StringBuilder();
 			String currentTimestamp = getTime();
-
-			query.append("INSERT INTO parking (userId, gateIn, timeIn) VALUES(:userId, :gateIn, :timeIn)");
+			String query = "INSERT INTO parking (userId, gateIn, timeIn) VALUES(:userId, :gateIn, :timeIn)";
 
 			try (Connection con = getSql2o().open()) {
-				con.createQuery(query.toString()).addParameter("userId", getUser().getUid())
-						.addParameter("gateIn", request.getGateId()).addParameter("timeIn", currentTimestamp)
-						.executeUpdate();
+				con.createQuery(query.toString())
+					.addParameter("userId", getUser().getUid())
+					.addParameter("gateIn", request.getGateId())
+					.addParameter("timeIn", currentTimestamp)
+					.executeUpdate();
 			} catch (Exception e) {
-				return new BasicResponse(false, "Error could not process Check-In");
+				return new BasicResponse(false, "Check-in failed, couldn't process request");
 			}
 
-			return new ParkingResponse(true, "You have successfully Checked-In at Gate " + request.getGateId(),
+			return new ParkingResponse(true, "Check-in at gate " + request.getGateId() + " successful",
 					request.getGateId(), 1, currentTimestamp);
 		}
 
-		return new BasicResponse(false, "Error could not open Gate");
+		return new BasicResponse(false, "Check-in failed, couldn't open gate");
 	}
 
 	private BasicResponse checkOut(ParkingRequest request, Parking lastParking) {
-		// calc parking time
+		// calculate parking time
 		DateFormat format = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 
 		long parkingTime;
@@ -178,37 +254,46 @@ public class ComfyPark {
 			parkingTime = 60;
 		}
 
-		// calc parking price
-		double price = 5.55 + 0.0125 * parkingTime;
+		// calculate parking fee
+		double parkingFee = 5.55 + 0.0125 * parkingTime;
 
-		// format parking price
-		DecimalFormat df = new DecimalFormat("#.##");
-		price = Double.valueOf(df.format(price));
+		// round and format parking fee
+		parkingFee = Math.round(parkingFee * 20.0) / 20.0;
+		
+		DecimalFormat df = new DecimalFormat("0.00");
 
-		if (getPaymentProvider().processPayment(getUser().getUid(), price)) {
+		// process payment 
+		if (getPaymentProvider().processPayment(getUser(), parkingFee)) {
+			// open gate
 			if (getGateProvider().openGate(request.getGateId())) {
-				StringBuilder query = new StringBuilder();
 				String currentTimestamp = getTime();
-
-				query.append(
-						"UPDATE parking SET gateOut = :gateOut, timeOut = :timeOut, price = :price WHERE uid = :uid");
+				String query = "UPDATE parking SET gateOut = :gateOut, timeOut = :timeOut, parkingFee = :parkingFee WHERE uid = :uid";
 
 				try (Connection con = getSql2o().open()) {
-					con.createQuery(query.toString()).addParameter("gateOut", request.getGateId())
-							.addParameter("timeOut", currentTimestamp).addParameter("price", price)
-							.addParameter("uid", lastParking.getUid()).executeUpdate();
+					con.createQuery(query)
+						.addParameter("gateOut", request.getGateId())
+						.addParameter("timeOut", currentTimestamp)
+						.addParameter("parkingFee", parkingFee)
+						.addParameter("uid", lastParking.getUid())
+						.executeUpdate();
 				} catch (Exception e) {
-					return new BasicResponse(false, "Error could not process Check-Out");
+					return new BasicResponse(false, "Check-out failed, couldn't process request");
 				}
-
-				return new ParkingResponse(true, "You have successfully Checked-Out at Gate " + request.getGateId()
-						+ " - Parking Taxes: " + price + " CHF", request.getGateId(), 2);
+				
+				StringBuilder parkingResponse = new StringBuilder()
+					.append("Check-out at gate " + request.getGateId() + " successful, ")
+					.append("Parking duration: ")
+						.append(convertSeconds((int)parkingTime))
+					.append(" - Parking fees: ")
+						.append(df.format(parkingFee)).append(" CHF");
+				
+				return new ParkingResponse(true, parkingResponse.toString(), request.getGateId(), 2);		
 			}
 
-			return new BasicResponse(false, "Error could not open Gate");
+			return new BasicResponse(false, "Check-out failed, couldn't open gate");
 		}
 
-		return new BasicResponse(false, "Error could process Payment");
+		return new BasicResponse(false, "Check-out failed, couldn't process payment");
 	}
 
 	private String getTime() {
@@ -219,8 +304,18 @@ public class ComfyPark {
 
 		return formatter.format(currentdate.getTime());
 	}
+	
+	private String convertSeconds(int seconds){
+	    int h = seconds/ 3600;
+	    int m = (seconds % 3600) / 60;
+	    int s = seconds % 60;
+	    String sh = (h > 0 ? String.valueOf(h) + " " + "h" : "");
+	    String sm = (m < 10 && m > 0 && h > 0 ? "0" : "") + (m > 0 ? (h > 0 && s == 0 ? String.valueOf(m) : String.valueOf(m) + " " + "min") : "");
+	    String ss = (s == 0 && (h > 0 || m > 0) ? "" : (s < 10 && (h > 0 || m > 0) ? "0" : "") + String.valueOf(s) + " " + "sec");
+	    return sh + (h > 0 ? " " : "") + sm + (m > 0 ? " " : "") + ss;
+	}
 
-	public String getHash(String data) {
+	private String getHash(String data) {
 		try {
 			// add salt
 			data = data + getConfig().getBackend().getHashSalt();
@@ -238,7 +333,7 @@ public class ComfyPark {
 
 			return hexString.toString();
 		} catch (Exception ex) {
-			//throw new RuntimeException(ex);
+			// throw new RuntimeException(ex);
 			return "";
 		}
 	}

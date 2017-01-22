@@ -7,7 +7,7 @@ public class Parking {
 	private String timeIn;
 	private int gateOut;
 	private String timeOut;
-	private double price;
+	private double parkingFee;
 
 	public int getUid() {
 		return uid;
@@ -38,7 +38,7 @@ public class Parking {
 	}
 
 	public void setTimeIn(String timeIn) {
-		this.timeIn = timeIn;
+		this.timeIn = fixDateTime(timeIn);
 	}
 
 	public int getGateOut() {
@@ -54,14 +54,21 @@ public class Parking {
 	}
 
 	public void setTimeOut(String timeOut) {
-		this.timeOut = timeOut;
+		this.timeOut = fixDateTime(timeOut);
 	}
 
-	public double getPrice() {
-		return price;
+	public double getParkingFee() {
+		return parkingFee;
 	}
 
-	public void setPrice(double price) {
-		this.price = price;
+	public void setParkingFee(double parkingFee) {
+		this.parkingFee = parkingFee;
+	}
+
+	private String fixDateTime(String string) {
+		if (string != null && string.length() > 0 && string.charAt(string.length() - 2) == '.') {
+			string = string.substring(0, string.length() - 2);
+		}
+		return string;
 	}
 }

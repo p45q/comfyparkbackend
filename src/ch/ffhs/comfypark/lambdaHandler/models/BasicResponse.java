@@ -9,6 +9,10 @@ public class BasicResponse {
 		setMessage(message);
 	}
 
+	public BasicResponse(String message) {
+		this(true, message);
+	}
+
 	public BasicResponse() {
 		this(true, "");
 	}

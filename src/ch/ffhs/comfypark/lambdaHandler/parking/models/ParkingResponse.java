@@ -18,7 +18,7 @@ public class ParkingResponse extends BasicResponse {
 	public ParkingResponse(Boolean success, String message, int gateId, int gateAction) {
 		this(success, message, gateId, gateAction, "");
 	}
-	
+
 	public int getGateId() {
 		return gateId;
 	}
@@ -42,5 +42,4 @@ public class ParkingResponse extends BasicResponse {
 	public void setTimeIn(String timeIn) {
 		this.timeIn = timeIn;
 	}
-
 }

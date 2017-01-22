@@ -8,6 +8,8 @@ public class User {
 	private String sex;
 	private String forename;
 	private String lastname;
+	private String lastLogin;
+	private int countLogins;
 
 	public int getUid() {
 		return uid;
@@ -65,4 +67,19 @@ public class User {
 		this.lastname = lastname;
 	}
 
+	public String getLastLogin() {
+		return lastLogin;
+	}
+
+	public void setLastLogin(String lastLogin) {
+		this.lastLogin = lastLogin;
+	}
+
+	public int getCountLogins() {
+		return countLogins;
+	}
+
+	public void setCountLogins(int countLogins) {
+		this.countLogins = countLogins;
+	}
 }

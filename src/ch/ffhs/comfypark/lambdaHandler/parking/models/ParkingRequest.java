@@ -1,9 +1,9 @@
 package ch.ffhs.comfypark.lambdaHandler.parking.models;
 
-import ch.ffhs.comfypark.lambdaHandler.models.BasicRequest;
+import ch.ffhs.comfypark.lambdaHandler.models.SignedRequest;
 
-public class ParkingRequest extends BasicRequest {
-	private int gateId;
+public class ParkingRequest extends SignedRequest {
+	public int gateId;
 
 	public int getGateId() {
 		return gateId;
@@ -12,5 +12,4 @@ public class ParkingRequest extends BasicRequest {
 	public void setGateId(int gateId) {
 		this.gateId = gateId;
 	}
-
 }
